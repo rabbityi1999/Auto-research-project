@@ -1,0 +1,4 @@
+interface:
+  display_name: "文献调研 PPT"
+  short_description: "将精读证据与横向比较转化为可编辑文献汇报演示文稿及讲解备注"
+  default_prompt: "使用 $research-slides 将本次调研的精读笔记整理成中文组会汇报 PPT。"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文导读与选文"
+  short_description: "讲解研究脉络、论文价值及推荐理由，帮助用户决定哪些文章值得精读"
+  default_prompt: "使用 $research-briefing 向我介绍候选论文和研究路线，等我决定精读范围。"

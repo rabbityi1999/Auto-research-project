@@ -1,0 +1,4 @@
+interface:
+  display_name: "论文检索与初筛"
+  short_description: "围绕科研问题检索文献、核对来源、去重并整理可讨论的候选论文"
+  default_prompt: "使用 $research-survey 为当前课题检索和初筛论文，保留查询日志与来源。"

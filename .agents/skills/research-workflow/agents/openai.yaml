@@ -1,0 +1,4 @@
+interface:
+  display_name: "科研工作流"
+  short_description: "串联论文调研、中文导读、用户选文、证据精读与文献调研演示文稿"
+  default_prompt: "使用 $research-workflow 调研我的课题，先向我介绍论文，等我选定后精读并制作 PPT。"

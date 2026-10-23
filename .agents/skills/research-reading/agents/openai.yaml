@@ -1,0 +1,4 @@
+interface:
+  display_name: "所选论文精读"
+  short_description: "精读用户选择的论文，核验方法与实验，生成可追溯笔记及横向比较"
+  default_prompt: "使用 $research-reading 精读我选定的论文，重点讲清方法机制和实验依据。"
