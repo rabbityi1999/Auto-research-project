@@ -64,6 +64,7 @@ runs/<课题>/          每次实际调研的材料与输出（默认不上传�
 ```powershell
 python scripts/workflow.py init runs/my-topic --topic "我的研究课题"
 python scripts/workflow.py status runs/my-topic
+python scripts/workflow.py resume runs/my-topic
 python scripts/workflow.py import runs/my-topic --papers candidates.json
 python scripts/workflow.py brief runs/my-topic --file briefing.md
 python scripts/workflow.py select runs/my-topic --ids P001 P003 --user-message "精读 P001 和 P003"
@@ -78,6 +79,18 @@ python -m unittest discover -s tests -v
 `select` 只能在导读之后执行，需记录用户的真实决定。脚本检查阶段和文件，不会认证消息是谁写的，也无法代替 AI 核对科学内容。修改候选集会使旧导读失效；重新选文会清除已登记的精读状态，需要重新核验现有笔记。笔记登记后发生改动，交付检查会提示重新登记。
 
 `complete` 要求所选论文的笔记齐全、PPTX 包含幻灯片、存在质量检查记录。AI 仍必须逐页查看渲染结果并检查引用，这些判断无法仅凭文件存在性完成。
+
+## 长任务断线后继续
+
+工作流按检索批次、论文小节和 PPT 页面批次保存文件与检查点。中断后，在同一聊天或打开本仓库的新聊天中发送：
+
+```text
+使用 $research-workflow，从 runs/my-topic 的检查点继续。
+先运行 resume 并核对已有文件，复用校验通过的精读笔记，继续未完成部分。
+保留我之前的选文决定，不要从头重做。
+```
+
+AI 使用 `checkpoint` 登记阶段内进度，用 `resume` 查看待处理论文、文件变化和下一步。详见 [断线恢复协议](docs/protocol.md#断线与恢复)。这些措施用于减少重做，不会修复客户端的 `stream disconnected` 网络错误，也不会在客户端停止后自行重启模型。未保存的内容仍可能丢失。
 
 ## GitHub 与材料管理
 

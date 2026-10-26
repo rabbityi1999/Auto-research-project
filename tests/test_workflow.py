@@ -3,6 +3,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -152,6 +153,71 @@ class WorkflowTests(unittest.TestCase):
         self.put("notes/P001.md", "fixture")
         with self.assertRaises(w.WorkflowError):
             w.read_paper(self.run, "P001", "notes/P001.md", "missing.pdf")
+
+    def test_resume_old_run_without_checkpoint(self):
+        report = w.resume(self.run)
+        self.assertIsNone(report["checkpoint"])
+        self.assertTrue(report["selection_required"])
+
+    def test_checkpoint_does_not_complete_partial_reading(self):
+        self.select(["P001", "P002"])
+        self.read("P001")
+        self.put("notes/P002.md", "方法已读，实验尚未读")
+        w.checkpoint(self.run, "P002 方法已读", "核查实验", ["notes/P002.md"])
+        report = w.resume(self.run)
+        self.assertEqual(report["verified_notes"], ["P001"])
+        self.assertEqual(report["pending_papers"], ["P002"])
+        self.assertTrue(report["checkpoint_usable"])
+        self.assertEqual(report["phase"], "reading")
+        with self.assertRaises(w.WorkflowError):
+            w.check(self.run)
+
+    def test_checkpoint_cannot_bypass_user_selection(self):
+        w.brief(self.run, "briefing.md")
+        w.checkpoint(self.run, "导读完成", "等待用户选文", ["briefing.md"])
+        self.assertTrue(w.resume(self.run)["selection_required"])
+        with self.assertRaises(w.WorkflowError):
+            self.read()
+
+    def test_changed_selection_makes_checkpoint_stale(self):
+        self.select()
+        self.put("notes/P001.md", "部分笔记")
+        w.checkpoint(self.run, "P001 方法", "读 P001 实验", ["notes/P001.md"])
+        w.select(self.run, ["P002"], "改选 P002")
+        report = w.resume(self.run)
+        self.assertFalse(report["checkpoint_usable"])
+        self.assertEqual(report["pending_papers"], ["P002"])
+
+    def test_missing_or_modified_checkpoint_file_reported(self):
+        self.select()
+        path = self.put("notes/P001.md", "partial")
+        w.checkpoint(self.run, "方法", "实验", ["notes/P001.md"])
+        path.write_text("changed", encoding="utf-8")
+        self.assertFalse(w.resume(self.run)["checkpoint_usable"])
+        path.unlink()
+        self.assertFalse(w.resume(self.run)["checkpoint_usable"])
+
+    def test_resume_is_readonly_and_detects_missing_registered_note(self):
+        self.select()
+        self.read()
+        before = (self.run / "state.json").read_bytes()
+        (self.run / "notes/P001.md").unlink()
+        report = w.resume(self.run)
+        self.assertEqual(report["pending_papers"], ["P001"])
+        self.assertEqual((self.run / "state.json").read_bytes(), before)
+
+    def test_checkpoint_requires_saved_files(self):
+        for files in ([], ["notes/missing.md"]):
+            with self.assertRaises(w.WorkflowError):
+                w.checkpoint(self.run, "current", "next", files)
+
+    def test_interrupted_state_replace_preserves_prior_state(self):
+        before = (self.run / "state.json").read_bytes()
+        with patch.object(Path, "replace", side_effect=OSError("Simulated interruption")):
+            with self.assertRaises(OSError):
+                w.checkpoint(self.run, "导读草稿", "继续导读", ["briefing.md"])
+        self.assertEqual((self.run / "state.json").read_bytes(), before)
+        self.assertEqual(w.resume(self.run)["phase"], "collecting")
 
 
 if __name__ == "__main__":

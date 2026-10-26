@@ -223,16 +223,64 @@ def status(run):
         if state["delivery"]:
             verify(run, state["delivery"]["deck"])
             verify(run, state["delivery"]["qa"])
-    except WorkflowError as exc:
+    except (WorkflowError, OSError) as exc:
         issues.append(str(exc))
     return {"topic": state["topic"], "phase": state["phase"], "selected": state["selection"],
             "read": list(state["readings"]), "delivery": state["delivery"], "issues": issues}
 
 
+def checkpoint(run, current, next_step, files):
+    """Save partial progress without marking papers or the run complete."""
+    state = load(run)
+    require(current.strip() and next_step.strip(), "Current progress and next step are required.")
+    require(bool(files), "Save at least one work file before creating a checkpoint.")
+    item = {"current": current, "next_step": next_step, "files": [record(run, f) for f in files],
+            "at": now(), "phase": state["phase"], "papers_hash": state["papers_hash"],
+            "selection": state["selection"]}
+    state["checkpoint"] = item
+    return save(run, state, "checkpoint", item)
+
+
+def resume(run):
+    """Read-only recovery report. Never interpret a checkpoint as user approval."""
+    state = load(run)
+    report = status(run)
+    valid, pending = [], []
+    for paper_id in (state["selection"] or {}).get("ids", []):
+        item = state["readings"].get(paper_id)
+        try:
+            require(item is not None, "Not registered")
+            verify(run, item)
+        except (WorkflowError, OSError):
+            pending.append(paper_id)
+        else:
+            valid.append(paper_id)
+    item = state.get("checkpoint")
+    checkpoint_issues = []
+    if item:
+        if (item["phase"] != state["phase"] or item["papers_hash"] != state["papers_hash"]
+                or item["selection"] != state["selection"]):
+            checkpoint_issues.append("Checkpoint belongs to an earlier phase, candidate set, or selection.")
+        for evidence in item["files"]:
+            try:
+                verify(run, evidence)
+            except (WorkflowError, OSError) as exc:
+                checkpoint_issues.append(str(exc))
+    report.update(verified_notes=valid, pending_papers=pending, checkpoint=item,
+                  checkpoint_issues=checkpoint_issues, checkpoint_usable=bool(item) and not checkpoint_issues,
+                  selection_required=state["selection"] is None)
+    report["recovery_rule"] = (
+        "Verify actual files and any running tools before retrying. Reuse unchanged registered notes. "
+        "Partial files are drafts, not completed readings. A checkpoint never substitutes for user selection. "
+        "If the checkpoint is stale, use current state and inspect the files before deciding the next step."
+    )
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "status", "import", "brief", "select", "read", "check", "complete"):
+    for name in ("init", "status", "import", "brief", "select", "read", "check", "complete", "checkpoint", "resume"):
         sub = commands.add_parser(name)
         sub.add_argument("run", type=Path)
         if name == "init":
@@ -251,6 +299,10 @@ def main(argv=None):
         elif name == "complete":
             sub.add_argument("--deck", required=True)
             sub.add_argument("--qa", required=True)
+        elif name == "checkpoint":
+            sub.add_argument("--current", required=True)
+            sub.add_argument("--next", dest="next_step", required=True)
+            sub.add_argument("--files", required=True, nargs="+")
     args = parser.parse_args(argv)
     try:
         if args.command == "init": result = init(args.run, args.topic)
@@ -260,6 +312,8 @@ def main(argv=None):
         elif args.command == "select": result = select(args.run, args.ids, args.user_message)
         elif args.command == "read": result = read_paper(args.run, args.id, args.note, args.source)
         elif args.command == "check": result = check(args.run)
+        elif args.command == "checkpoint": result = checkpoint(args.run, args.current, args.next_step, args.files)
+        elif args.command == "resume": result = resume(args.run)
         else: result = complete(args.run, args.deck, args.qa)
     except (WorkflowError, OSError, ValueError, zipfile.BadZipFile) as exc:
         print("Error: " + str(exc), file=sys.stderr)
