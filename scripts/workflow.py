@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+TOOL_VERSION = "0.3.0"
+
 
 class WorkflowError(ValueError):
     pass
@@ -64,6 +66,7 @@ def load(run):
 
 
 def save(run, state, event, details=None):
+    state["tooling"] = {"version": TOOL_VERSION, "script_sha256": digest(__file__)}
     state["updated_at"] = now()
     state["history"].append({"at": state["updated_at"], "event": event, "details": details})
     write_json(Path(run) / "state.json", state)
@@ -266,7 +269,15 @@ def resume(run):
                 verify(run, evidence)
             except (WorkflowError, OSError) as exc:
                 checkpoint_issues.append(str(exc))
-    report.update(verified_notes=valid, pending_papers=pending, checkpoint=item,
+    drafts = []
+    for paper_id in pending:
+        path = Path(run) / "notes" / (paper_id + ".md")
+        if path.is_file() and path.stat().st_size:
+            drafts.append({"id": paper_id, "file": record(run, "notes/" + paper_id + ".md"),
+                           "action": "Inspect this saved note before redoing work; do not automatically mark it read."})
+    report.update(verified_notes=valid, pending_papers=pending, saved_notes_to_review=drafts,
+                  current_tool_version=TOOL_VERSION, saved_tooling=state.get("tooling"),
+                  control=state.get("control", {"status": "active"}), checkpoint=item,
                   checkpoint_issues=checkpoint_issues, checkpoint_usable=bool(item) and not checkpoint_issues,
                   selection_required=state["selection"] is None)
     report["recovery_rule"] = (
@@ -277,10 +288,19 @@ def resume(run):
     return report
 
 
+def set_block(run, reason=None):
+    state = load(run)
+    if reason is not None:
+        require(reason.strip(), "A concrete blocker is required.")
+    state["control"] = {"status": "needs_input" if reason is not None else "active",
+                        "reason": reason, "at": now()}
+    return save(run, state, "block" if reason is not None else "unblock", state["control"])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "status", "import", "brief", "select", "read", "check", "complete", "checkpoint", "resume"):
+    for name in ("init", "status", "import", "brief", "select", "read", "check", "complete", "checkpoint", "resume", "block", "unblock"):
         sub = commands.add_parser(name)
         sub.add_argument("run", type=Path)
         if name == "init":
@@ -303,6 +323,8 @@ def main(argv=None):
             sub.add_argument("--current", required=True)
             sub.add_argument("--next", dest="next_step", required=True)
             sub.add_argument("--files", required=True, nargs="+")
+        elif name == "block":
+            sub.add_argument("--reason", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "init": result = init(args.run, args.topic)
@@ -314,6 +336,8 @@ def main(argv=None):
         elif args.command == "check": result = check(args.run)
         elif args.command == "checkpoint": result = checkpoint(args.run, args.current, args.next_step, args.files)
         elif args.command == "resume": result = resume(args.run)
+        elif args.command == "block": result = set_block(args.run, args.reason)
+        elif args.command == "unblock": result = set_block(args.run)
         else: result = complete(args.run, args.deck, args.qa)
     except (WorkflowError, OSError, ValueError, zipfile.BadZipFile) as exc:
         print("Error: " + str(exc), file=sys.stderr)
